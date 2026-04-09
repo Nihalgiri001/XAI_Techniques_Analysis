@@ -15,6 +15,7 @@ from pathlib import Path
 import torch
 import numpy as np
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -24,7 +25,9 @@ from models.train import train_model
 from utils.mri_dataset_loader import MRIDataLoader
 from utils.preprocessing import preprocess_image, convert_to_uint8
 from utils.visualization import plot_image, overlay_heatmap, plot_predictions
+from utils.gradcam_visualization import create_enhanced_gradcam_visualization, save_comparison_visualization
 from xai.shap_explainer import SHAPExplainer
+from xai.gradcam_enhanced import EnhancedGradCAM
 from evaluation.metrics import MultiLabelMetrics
 
 # Setup logging
@@ -136,18 +139,22 @@ def train_command(config_path: str) -> None:
     logger.info("=" * 70)
 
 
-def explain_command(config_path: str, model_path: str, image_path: str, output_dir: str = None) -> None:
-    """Generate SHAP explanation for an image."""
+def explain_command(config_path: str, model_path: str, image_path: str, output_dir: str = None, method: str = 'shap') -> None:
+    """Generate explanation for an image using specified method (SHAP or Grad-CAM)."""
     logger.info("=" * 70)
-    logger.info("STARTING EXPLANATION PIPELINE")
+    logger.info(f"STARTING {method.upper()} EXPLANATION PIPELINE")
     logger.info("=" * 70)
     
     # Load config
     config = load_config(config_path)
     setup_directories(config)
     
+    # Set output directory based on method
     if output_dir is None:
-        output_dir = config['shap']['save_dir']
+        if method == 'gradcam':
+            output_dir = 'experiments/results/Grad-CAM'
+        else:
+            output_dir = config['shap']['save_dir']
     os.makedirs(output_dir, exist_ok=True)
     
     # Setup device
@@ -170,91 +177,218 @@ def explain_command(config_path: str, model_path: str, image_path: str, output_d
         augment=False,
     )
     
-    # Create explainer (use SHAP GradientExplainer)
-    logger.info("Creating SHAP explainer...")
-    
-    # Load background data for SHAP
-    logger.info("Loading background data for SHAP...")
-    data_loader = MRIDataLoader(
-        dataset_dir=config['dataset']['path'],
-        image_size=config['dataset']['image_size'],
-    )
-    background_loader = data_loader.get_background_loader(
-        num_samples=config['shap']['background_size'],
-        batch_size=config['validation']['batch_size'],
-        num_workers=config['validation']['num_workers'],
-    )
-    
-    # Create SHAP explainer
-    logger.info("Creating SHAP explainer...")
-    explainer = SHAPExplainer(
-        background_loader=background_loader,
-        num_samples=config['shap']['background_size'],
-        device=device,
-        batch_size=config['shap'].get('batch_size', 32),
-    )
-    
-    # Generate explanation
-    logger.info("Generating SHAP explanation...")
-    explanation = explainer.explain(
-        image=image_tensor,
-        model=model,
-        target_class=None,  # Average over all classes
-    )
-    
-    # Get predictions
-    predictions = explanation['predictions']
+    # Get class names
     class_names = config['dataset'].get('classes', ['glioma', 'meningioma', 'notumor', 'pituitary'])
     
-    logger.info("\n" + "=" * 70)
-    logger.info("PREDICTIONS")
-    logger.info("=" * 70)
+    # ====================================================================
+    # GRAD-CAM EXPLANATION (ENHANCED)
+    # ====================================================================
+    if method == 'gradcam':
+        logger.info("Creating Enhanced Grad-CAM explainer...")
+        
+        # Get predictions first to determine target class
+        model.eval()
+        with torch.no_grad():
+            logits = model(image_tensor.unsqueeze(0))
+            predictions = torch.softmax(logits, dim=1).squeeze().cpu().numpy()
+        
+        predicted_class = predictions.argmax()
+        
+        logger.info(f"Predicted class: {class_names[predicted_class]} ({predictions[predicted_class]:.4f})")
+        
+        # Initialize Enhanced Grad-CAM
+        explainer = EnhancedGradCAM(device=device)
+        
+        # Generate explanations with different methods
+        logger.info("Generating Guided Grad-CAM (with post-processing)...")
+        explanation = explainer.explain(
+            image=image_tensor,
+            model=model,
+            predicted_class=predicted_class,
+            method='guided',  # Options: 'standard', 'guided', 'multiscale'
+        )
+        
+        # Save Grad-CAM visualizations
+        logger.info("\n" + "=" * 70)
+        logger.info("PREDICTIONS")
+        logger.info("=" * 70)
+        
+        for class_name, pred in zip(class_names, predictions):
+            marker = " ← PREDICTED" if pred == predictions[predicted_class] else ""
+            logger.info(f"{class_name:25s}: {pred:.4f}{marker}")
+        
+        # Create enhanced visualization with 5+ subplots
+        logger.info("Creating enhanced visualization...")
+        image_np = image_tensor.squeeze().cpu().numpy()
+        
+        # Properly denormalize the image for display
+        # The image comes normalized with ImageNet stats
+        # We need to denormalize: image = (image * std) + mean
+        imagenet_mean = np.array([0.485, 0.456, 0.406]).reshape(3, 1, 1)
+        imagenet_std = np.array([0.229, 0.224, 0.225]).reshape(3, 1, 1)
+        
+        if image_np.ndim == 3 and image_np.shape[0] == 3:
+            # Denormalize
+            image_np_display = (image_np * imagenet_std + imagenet_mean)
+            # Clip to valid range
+            image_np_display = np.clip(image_np_display, 0, 1)
+            # Convert to (H, W, C) for display
+            image_np_display = np.transpose(image_np_display, (1, 2, 0))
+        else:
+            image_np_display = image_np
+        
+        heatmap = explanation['heatmap']
+        
+        gradcam_path = os.path.join(output_dir, f'gradcam_enhanced_{class_names[predicted_class]}.png')
+        Path(gradcam_path).parent.mkdir(parents=True, exist_ok=True)
+        
+        fig = create_enhanced_gradcam_visualization(
+            image=image_np_display,
+            heatmap=heatmap,
+            predictions=predictions,
+            class_names=class_names,
+            predicted_class_idx=predicted_class,
+            method='guided',
+            figsize=(18, 10),
+        )
+        
+        fig.savefig(gradcam_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        
+        logger.info(f"✓ Saved enhanced Grad-CAM visualization to {gradcam_path}")
+        
+        # Save predictions chart
+        pred_path = os.path.join(output_dir, 'predictions.png')
+        plot_predictions(
+            predictions=predictions,
+            labels=np.zeros_like(predictions),
+            disease_classes=class_names,
+            top_k=len(class_names),
+            save_path=pred_path,
+        )
+        logger.info(f"✓ Saved predictions plot to {pred_path}")
+        
+        # Optional: Generate multi-scale comparison
+        logger.info("\nGenerating multi-scale Grad-CAM for comparison...")
+        explanation_multiscale = explainer.explain(
+            image=image_tensor,
+            model=model,
+            predicted_class=predicted_class,
+            method='multiscale',
+        )
+        
+        # Save both methods comparison
+        comparison_path = os.path.join(output_dir, f'gradcam_comparison_{class_names[predicted_class]}.png')
+        
+        # Generate standard for comparison
+        explanation_standard = explainer.explain(
+            image=image_tensor,
+            model=model,
+            predicted_class=predicted_class,
+            method='standard',
+        )
+        
+        save_comparison_visualization(
+            image=image_np_display,
+            heatmap_standard=explanation_standard['heatmap'],
+            heatmap_guided=explanation['heatmap'],
+            heatmap_multiscale=explanation_multiscale['heatmap'],
+            predictions=predictions,
+            class_names=class_names,
+            predicted_class_idx=predicted_class,
+            save_path=comparison_path,
+            figsize=(20, 12),
+        )
+        
+        logger.info(f"✓ Saved method comparison to {comparison_path}")
     
-    for class_name, pred in zip(class_names, predictions):
-        logger.info(f"{class_name:25s}: {pred:.4f}")
-    
-    # Prepare images for visualization
-    image_denorm = preprocess_image(image_path, config['dataset']['image_size']).cpu().numpy()
-    image_denorm = np.transpose(image_denorm, (1, 2, 0))
-    if image_denorm.shape[2] == 3:
-        # Keep as is for color
-        pass
+    # ====================================================================
+    # SHAP EXPLANATION
+    # ====================================================================
     else:
-        image_denorm = image_denorm.squeeze(2)
-    
-    image_display = convert_to_uint8(image_denorm if image_denorm.ndim == 3 else np.expand_dims(image_denorm, 2))
-    attributions = explanation['attributions']
-    
-    # Save visualizations
-    # 1. Plot predictions
-    pred_path = os.path.join(output_dir, 'predictions.png')
-    plot_predictions(
-        predictions=predictions,
-        labels=np.zeros_like(predictions),
-        disease_classes=class_names,
-        top_k=len(class_names),
-        save_path=pred_path,
-    )
-    logger.info(f"Saved predictions plot to {pred_path}")
-    
-    # 2. Plot SHAP explanation
-    shap_path = os.path.join(output_dir, 'shap_explanation.png')
-    explainer.visualize_explanation(
-        image=image_display,
-        attributions=attributions,
-        save_path=shap_path,
-        title='SHAP Explanation',
-    )
-    logger.info(f"Saved SHAP explanation to {shap_path}")
-    
-    # 3. Save original image
-    img_save_path = os.path.join(output_dir, 'original_image.png')
-    plot_image(
-        image=image_display,
-        title='Original Image',
-        save_path=img_save_path,
-    )
-    logger.info(f"Saved original image to {img_save_path}")
+        logger.info("Creating SHAP explainer...")
+        
+        # Load background data for SHAP
+        logger.info("Loading background data for SHAP...")
+        data_loader = MRIDataLoader(
+            dataset_dir=config['dataset']['path'],
+            image_size=config['dataset']['image_size'],
+        )
+        background_loader = data_loader.get_background_loader(
+            num_samples=config['shap']['background_size'],
+            batch_size=config['validation']['batch_size'],
+            num_workers=config['validation']['num_workers'],
+        )
+        
+        # Create SHAP explainer
+        logger.info("Creating SHAP explainer...")
+        explainer = SHAPExplainer(
+            background_loader=background_loader,
+            num_samples=config['shap']['background_size'],
+            device=device,
+            batch_size=config['shap'].get('batch_size', 32),
+        )
+        
+        # Generate explanation
+        logger.info("Generating SHAP explanation...")
+        explanation = explainer.explain(
+            image=image_tensor,
+            model=model,
+            target_class=None,  # Average over all classes
+        )
+        
+        # Get predictions
+        predictions = explanation['predictions']
+        
+        logger.info("\n" + "=" * 70)
+        logger.info("PREDICTIONS")
+        logger.info("=" * 70)
+        
+        for class_name, pred in zip(class_names, predictions):
+            logger.info(f"{class_name:25s}: {pred:.4f}")
+        
+        # Prepare images for visualization
+        image_denorm = preprocess_image(image_path, config['dataset']['image_size']).cpu().numpy()
+        image_denorm = np.transpose(image_denorm, (1, 2, 0))
+        if image_denorm.shape[2] == 3:
+            # Keep as is for color
+            pass
+        else:
+            image_denorm = image_denorm.squeeze(2)
+        
+        image_display = convert_to_uint8(image_denorm if image_denorm.ndim == 3 else np.expand_dims(image_denorm, 2))
+        attributions = explanation['attributions']
+        
+        # Save visualizations
+        # 1. Plot predictions
+        pred_path = os.path.join(output_dir, 'predictions.png')
+        plot_predictions(
+            predictions=predictions,
+            labels=np.zeros_like(predictions),
+            disease_classes=class_names,
+            top_k=len(class_names),
+            save_path=pred_path,
+        )
+        logger.info(f"Saved predictions plot to {pred_path}")
+        
+        # 2. Plot SHAP explanation
+        shap_path = os.path.join(output_dir, 'shap_explanation.png')
+        explainer.visualize_explanation(
+            image=image_display,
+            attributions=attributions,
+            save_path=shap_path,
+            title='SHAP Explanation',
+        )
+        logger.info(f"Saved SHAP explanation to {shap_path}")
+        
+        # 3. Save original image
+        img_save_path = os.path.join(output_dir, 'original_image.png')
+        plot_image(
+            image=image_display,
+            title='Original Image',
+            save_path=img_save_path,
+        )
+        logger.info(f"Saved original image to {img_save_path}")
     
     logger.info("=" * 70)
     logger.info("EXPLANATION COMPLETED")
@@ -304,6 +438,13 @@ def main():
         default=None,
         help='Output directory for results'
     )
+    explain_parser.add_argument(
+        '--method',
+        type=str,
+        choices=['shap', 'gradcam'],
+        default='shap',
+        help='Explanation method: shap or gradcam'
+    )
     
     args = parser.parse_args()
     
@@ -313,7 +454,13 @@ def main():
     if args.command == 'train':
         train_command(args.config)
     elif args.command == 'explain':
-        explain_command(args.config, args.model_path, args.image_path, args.output_dir)
+        explain_command(
+            args.config,
+            args.model_path,
+            args.image_path,
+            args.output_dir,
+            args.method,
+        )
     else:
         parser.print_help()
 

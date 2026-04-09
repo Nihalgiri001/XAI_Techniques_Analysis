@@ -146,9 +146,43 @@ class GradCAMExplainer(Explainer):
             'method': 'GradCAM',
             'logits': logits[0].cpu().detach().numpy(),
         }
+    
+    def explain_batch(
+        self,
+        images: torch.Tensor,
+        model: nn.Module,
+        target_class: int = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate Grad-CAM explanations for a batch of images.
+        
+        Args:
+            images: Batch of input images.
+            model: CNN model.
+            target_class: Target class for explanation.
+            
+        Returns:
+            dict: Batch explanations.
+        """
+        # For batch, just process each image individually
+        batch_size = images.shape[0]
+        explanations = []
+        
+        for i in range(batch_size):
+            exp = self.explain(
+                image=images[i:i+1],
+                model=model,
+                target_class=target_class,
+            )
+            explanations.append(exp)
+        
+        return {
+            'explanations': explanations,
+            'method': 'GradCAM',
+            'batch_size': batch_size,
+        }
 
 
-@ExplainerFactory.register('gradcam')
 def create_gradcam_explainer(
     device: str = 'cuda',
     **kwargs

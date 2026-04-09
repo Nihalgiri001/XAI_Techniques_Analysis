@@ -26,8 +26,10 @@ from utils.mri_dataset_loader import MRIDataLoader
 from utils.preprocessing import preprocess_image, convert_to_uint8
 from utils.visualization import plot_image, overlay_heatmap, plot_predictions
 from utils.gradcam_visualization import create_enhanced_gradcam_visualization, save_comparison_visualization
+from utils.lime_visualization import create_lime_visualization, create_lime_comparison_visualization
 from xai.shap_explainer import SHAPExplainer
 from xai.gradcam_enhanced import EnhancedGradCAM
+from xai.lime_explainer import LIMEExplainer
 from evaluation.metrics import MultiLabelMetrics
 
 # Setup logging
@@ -153,6 +155,8 @@ def explain_command(config_path: str, model_path: str, image_path: str, output_d
     if output_dir is None:
         if method == 'gradcam':
             output_dir = 'experiments/results/Grad-CAM'
+        elif method == 'lime':
+            output_dir = 'experiments/results/LIME'
         else:
             output_dir = config['shap']['save_dir']
     os.makedirs(output_dir, exist_ok=True)
@@ -303,6 +307,112 @@ def explain_command(config_path: str, model_path: str, image_path: str, output_d
         logger.info(f"✓ Saved method comparison to {comparison_path}")
     
     # ====================================================================
+    # LIME EXPLANATION
+    # ====================================================================
+    elif method == 'lime':
+        logger.info("Creating LIME explainer...")
+        
+        # Get predictions first to determine target class
+        model.eval()
+        with torch.no_grad():
+            logits = model(image_tensor.unsqueeze(0))
+            predictions = torch.softmax(logits, dim=1).squeeze().cpu().numpy()
+        
+        predicted_class = predictions.argmax()
+        
+        logger.info(f"Predicted class: {class_names[predicted_class]} ({predictions[predicted_class]:.4f})")
+        
+        # Initialize LIME explainer
+        explainer = LIMEExplainer(device=device, num_samples=150, num_features=50)
+        
+        # Get image for LIME (denormalized)
+        image_np = image_tensor.squeeze().cpu().numpy()
+        
+        # Denormalize for LIME
+        imagenet_mean = np.array([0.485, 0.456, 0.406]).reshape(3, 1, 1)
+        imagenet_std = np.array([0.229, 0.224, 0.225]).reshape(3, 1, 1)
+        
+        if image_np.ndim == 3 and image_np.shape[0] == 3:
+            image_np_display = (image_np * imagenet_std + imagenet_mean)
+            image_np_display = np.clip(image_np_display, 0, 1)
+            image_np_display = np.transpose(image_np_display, (1, 2, 0))
+        else:
+            image_np_display = image_np
+        
+        # Generate LIME explanation
+        logger.info("Generating LIME explanation (this may take a minute)...")
+        explanation = explainer.explain(
+            image=image_np_display,
+            model=model,
+            target_class=predicted_class,
+        )
+        
+        # Save LIME visualizations
+        logger.info("\n" + "=" * 70)
+        logger.info("PREDICTIONS")
+        logger.info("=" * 70)
+        
+        for class_name, pred in zip(class_names, predictions):
+            marker = " ← PREDICTED" if pred == predictions[predicted_class] else ""
+            logger.info(f"{class_name:25s}: {pred:.4f}{marker}")
+        
+        # Create main LIME visualization
+        logger.info("Creating LIME visualization...")
+        lime_path = os.path.join(output_dir, f'lime_{class_names[predicted_class]}.png')
+        Path(lime_path).parent.mkdir(parents=True, exist_ok=True)
+        
+        fig = create_lime_visualization(
+            image=image_np_display,
+            heatmap=explanation['heatmap'],
+            segments=explanation['segments'],
+            predictions=predictions,
+            class_names=class_names,
+            predicted_class_idx=predicted_class,
+            lime_score=explanation['score'],
+            figsize=(18, 10),
+        )
+        
+        fig.savefig(lime_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        
+        logger.info(f"✓ Saved LIME visualization to {lime_path}")
+        
+        # Save detailed comparison visualization
+        logger.info("Creating detailed LIME analysis...")
+        lime_detail_path = os.path.join(output_dir, f'lime_detailed_{class_names[predicted_class]}.png')
+        
+        fig = create_lime_comparison_visualization(
+            image=image_np_display,
+            heatmap_lime=explanation['heatmap'],
+            segments=explanation['segments'],
+            predictions=predictions,
+            class_names=class_names,
+            predicted_class_idx=predicted_class,
+            lime_score=explanation['score'],
+            figsize=(16, 10),
+        )
+        
+        fig.savefig(lime_detail_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        
+        logger.info(f"✓ Saved detailed LIME analysis to {lime_detail_path}")
+        
+        # Save predictions chart
+        pred_path = os.path.join(output_dir, 'predictions.png')
+        plot_predictions(
+            predictions=predictions,
+            labels=np.zeros_like(predictions),
+            disease_classes=class_names,
+            top_k=len(class_names),
+            save_path=pred_path,
+        )
+        logger.info(f"✓ Saved predictions plot to {pred_path}")
+        
+        # Log LIME model quality
+        logger.info(f"\nLIME Model Quality (R² score): {explanation['score']:.4f}")
+        logger.info(f"Number of superpixels: {explanation['num_superpixels']}")
+    
+    # ====================================================================
     # SHAP EXPLANATION
     # ====================================================================
     else:
@@ -441,9 +551,9 @@ def main():
     explain_parser.add_argument(
         '--method',
         type=str,
-        choices=['shap', 'gradcam'],
+        choices=['shap', 'gradcam', 'lime'],
         default='shap',
-        help='Explanation method: shap or gradcam'
+        help='Explanation method: shap, gradcam, or lime'
     )
     
     args = parser.parse_args()

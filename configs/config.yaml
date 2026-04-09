@@ -13,7 +13,7 @@ dataset:
 model:
   architecture: "resnet50"
   pretrained: true
-  num_classes: 14
+  num_classes: 4
   dropout_rate: 0.5
 
 # Training configuration
@@ -36,8 +36,8 @@ validation:
 
 # SHAP configuration
 shap:
-  background_size: 50
-  num_samples: 100
+  background_size: 20
+  num_samples: 30
   save_dir: "experiments/results/shap"
   device: "auto"  # 'auto', 'cuda', 'cpu'
 

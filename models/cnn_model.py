@@ -37,6 +37,11 @@ class ResNet50ChestXray(nn.Module):
         # Load pretrained ResNet50
         self.resnet = models.resnet50(pretrained=True)
         
+        # Disable inplace operations in ReLU for SHAP compatibility
+        for module in self.resnet.modules():
+            if isinstance(module, torch.nn.ReLU):
+                module.inplace = False
+        
         # Remove the original fully connected layer
         num_features = self.resnet.fc.in_features
         self.resnet.fc = nn.Identity()

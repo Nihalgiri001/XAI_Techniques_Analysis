@@ -21,6 +21,20 @@ from utils.visualization import overlay_heatmap
 logger = logging.getLogger(__name__)
 
 
+class SHAPCompatibleWrapper(nn.Module):
+    """
+    Wrapper to make models SHAP-compatible by handling gradient computation.
+    Disables eval mode's no_grad context during SHAP computation.
+    """
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+    
+    def forward(self, x):
+        # Ensure gradients are enabled for SHAP
+        return self.model(x)
+
+
 class SHAPExplainer(Explainer):
     """
     SHAP explainer for neural networks.
@@ -98,31 +112,26 @@ class SHAPExplainer(Explainer):
         background: torch.Tensor,
     ):
         """
-        Create SHAP DeepExplainer.
+        Create SHAP GradientExplainer (simpler than DeepExplainer, no autograd issues).
         
         Args:
             model: PyTorch model to explain.
             background: Background images for baseline.
             
         Returns:
-            shap.DeepExplainer: SHAP explainer instance.
+            shap.GradientExplainer: SHAP explainer instance.
         """
-        logger.info("Creating SHAP DeepExplainer...")
+        logger.info("Creating SHAP GradientExplainer...")
         
-        # Wrap model for SHAP (model should output logits)
-        def model_fn(x):
-            with torch.no_grad():
-                output = model(x)
-            return output.cpu().numpy()
-        
-        # Create explainer
-        explainer = shap.DeepExplainer(
+        # Use GradientExplainer instead of DeepExplainer
+        # GradientExplainer computes gradients of outputs w.r.t. inputs
+        explainer = shap.GradientExplainer(
             model,
             background,
         )
         
         self.explainer = explainer
-        logger.info("Created SHAP DeepExplainer")
+        logger.info("Created SHAP GradientExplainer")
         
         return explainer
     
@@ -172,18 +181,23 @@ class SHAPExplainer(Explainer):
         logger.info("Computing SHAP values...")
         model.eval()
         
+        # Enable gradients for SHAP computation (required by DeepExplainer)
+        image = image.requires_grad_(True)
+        
+        shap_values = self.explainer.shap_values(image)
+        
+        # Get predictions without gradients
         with torch.no_grad():
-            shap_values = self.explainer.shap_values(image)
-            predictions = torch.sigmoid(model(image))
+            predictions = torch.sigmoid(model(image.detach()))
         
         # shap_values is a list [num_classes] of arrays with shape (1, 3, H, W)
         if isinstance(shap_values, list):
             shap_values = np.stack(shap_values, axis=0)  # (num_classes, 1, 3, H, W)
             shap_values = shap_values.squeeze(1)  # (num_classes, 3, H, W)
         
-        # Convert to numpy
-        image_np = image.cpu().numpy()
-        predictions_np = predictions.cpu().numpy()[0]
+        # Convert to numpy (detach first since image requires grad)
+        image_np = image.detach().cpu().numpy()
+        predictions_np = predictions.detach().cpu().numpy()[0]
         
         # Create attribution heatmap by averaging across channels
         if shap_values.ndim == 4:

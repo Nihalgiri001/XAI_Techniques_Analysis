@@ -170,17 +170,15 @@ def explain_command(config_path: str, model_path: str, image_path: str, output_d
         augment=False,
     )
     
-    # Load background data
+    # Create explainer (use SHAP GradientExplainer)
+    logger.info("Creating SHAP explainer...")
+    
+    # Load background data for SHAP
     logger.info("Loading background data for SHAP...")
-    dataset_dir = config['dataset']['path']
-    classes = config['dataset'].get('classes', ['glioma', 'meningioma', 'notumor', 'pituitary'])
-    
     data_loader = MRIDataLoader(
-        dataset_dir=dataset_dir,
+        dataset_dir=config['dataset']['path'],
         image_size=config['dataset']['image_size'],
-        classes=classes,
     )
-    
     background_loader = data_loader.get_background_loader(
         num_samples=config['shap']['background_size'],
         batch_size=config['validation']['batch_size'],

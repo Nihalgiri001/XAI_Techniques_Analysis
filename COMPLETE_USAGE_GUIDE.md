@@ -31,7 +31,7 @@ source xai-env/bin/activate
 
 ### Fastest Way to Get Started (Grad-CAM)
 ```bash
-python main.py explain \
+python3 main.py explain \
   --config configs/config.yaml \
   --model_path models/checkpoints/best_model.pth \
   --image_path data/raw/MRI/Testing/pituitary/Te-pi_1.jpg \
@@ -48,7 +48,7 @@ python main.py explain \
 If you only want predictions without explanations, use Grad-CAM (it's the fastest explainer):
 
 ```bash
-python main.py explain \
+python3 main.py explain \
   --config configs/config.yaml \
   --model_path models/checkpoints/best_model.pth \
   --image_path data/raw/MRI/Testing/pituitary/Te-pi_1.jpg \
@@ -77,7 +77,7 @@ Grad-CAM (Gradient-weighted Class Activation Mapping) shows which regions of the
 
 ### Basic Usage
 ```bash
-python main.py explain \
+python3 main.py explain \
   --config configs/config.yaml \
   --model_path models/checkpoints/best_model.pth \
   --image_path data/raw/MRI/Testing/pituitary/Te-pi_1.jpg \
@@ -88,16 +88,16 @@ python main.py explain \
 ```bash
 # Test on different tumor types
 # Pituitary
-python main.py explain --config configs/config.yaml --model_path models/checkpoints/best_model.pth --image_path data/raw/MRI/Testing/pituitary/Te-pi_1.jpg --method gradcam
+python3 main.py explain --config configs/config.yaml --model_path models/checkpoints/best_model.pth --image_path data/raw/MRI/Testing/pituitary/Te-pi_1.jpg --method gradcam
 
 # Glioma
-python main.py explain --config configs/config.yaml --model_path models/checkpoints/best_model.pth --image_path data/raw/MRI/Testing/glioma/Te-gl_1.jpg --method gradcam
+python3 main.py explain --config configs/config.yaml --model_path models/checkpoints/best_model.pth --image_path data/raw/MRI/Testing/glioma/Te-gl_1.jpg --method gradcam
 
 # Meningioma
-python main.py explain --config configs/config.yaml --model_path models/checkpoints/best_model.pth --image_path data/raw/MRI/Testing/meningioma/Te-men_1.jpg --method gradcam
+python3 main.py explain --config configs/config.yaml --model_path models/checkpoints/best_model.pth --image_path data/raw/MRI/Testing/meningioma/Te-men_1.jpg --method gradcam
 
 # No Tumor
-python main.py explain --config configs/config.yaml --model_path models/checkpoints/best_model.pth --image_path data/raw/MRI/Testing/notumor/Te-no_1.jpg --method gradcam
+python3 main.py explain --config configs/config.yaml --model_path models/checkpoints/best_model.pth --image_path data/raw/MRI/Testing/notumor/Te-no_1.jpg --method gradcam
 ```
 
 ### Output Files

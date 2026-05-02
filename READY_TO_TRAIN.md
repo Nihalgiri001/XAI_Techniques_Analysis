@@ -93,7 +93,7 @@ Visit: https://nihcc.app.box.com/v/ChestXray-NIHCC
 
 ### Step 3: Start Training
 ```bash
-python main.py train --config configs/config.yaml
+python3 main.py train --config configs/config.yaml
 ```
 
 Expected runtime: 2-4 hours on CPU, 15-30 min on GPU

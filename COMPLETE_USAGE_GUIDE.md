@@ -33,7 +33,7 @@ source xai-env/bin/activate
 ```bash
 python3 main.py explain \
   --config configs/config.yaml \
-  --model_path models/checkpoints/best_model.pth \
+  --model_path models/checkpoints/checkpoint_epoch_10.pth \
   --image_path data/raw/MRI/Testing/pituitary/Te-pi_1.jpg \
   --method gradcam
 ```

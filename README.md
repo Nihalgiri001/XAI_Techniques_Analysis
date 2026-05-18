@@ -1,320 +1,95 @@
-# XAI Techniques Analysis for Chest X-ray Classification
+# XAI Techniques Analysis — MRI Brain Tumour Classification
 
-A comprehensive, production-quality Python project for evaluating explainable AI (XAI) techniques on medical imaging using the NIH ChestX-ray14 dataset.
+This repository provides a working PyTorch pipeline for MRI brain tumour
+classification (ResNet50-based) and integrated explainability tools with a
+modular evaluation system that compares SHAP, Grad-CAM and LIME.
 
-## 🎯 Project Overview
+This README is a concise, actionable reference for the current code in this
+workspace (training, inference, explainers, and evaluation).
 
-This project builds a complete pipeline for:
-1. **Training** a CNN model (ResNet50) on the NIH ChestX-ray14 dataset
-2. **Multi-label classification** of 14 chest diseases
-3. **Explainability** using SHAP (SHapley Additive exPlanations)
-4. **Evaluation** with medical imaging metrics
+Prerequisites
+- Python 3.8+ with required packages installed from `requirements.txt`.
+- Data placed under `data/raw/MRI/` with `Training/` and `Testing/` subfolders.
 
-The architecture is modular and extensible, designed to support additional XAI techniques (LIME, Grad-CAM) in the future.
+Repository layout (key folders)
+- `models/` — model architecture and training utilities.
+- `xai/` — explainers: `shap_explainer.py`, `gradcam_enhanced.py`, `lime_explainer.py`.
+- `evaluation/` — evaluation utilities: `xai_explainers_eval.py`, `xai_comparison.py`.
+- `scripts/` — helper scripts; `evaluate_xai.py` runs the evaluator.
+- `utils/` — preprocessing, dataset loader, visualization helpers.
+- `configs/config.yaml` — main configuration for dataset/model/training/explainers.
+- `experiments/results/` — where visual outputs and evaluation plots are saved.
 
-## 📦 Dataset
+Quick commands
+All commands assume your working directory is the repository root.
 
-The project uses the **NIH ChestX-ray14 dataset** already downloaded and located at:
-```
-data/raw/NIH_ChestXray/
-```
-
-### Dataset Structure
-- **Images**: Distributed across `images_001/` to `images_012/` directories
-- **Labels**: `Data_Entry_2017.csv` (14 disease classes)
-- **Splits**: `train_val_list.txt`, `test_list.txt`
-- **Annotations**: `BBox_List_2017.csv` (bounding boxes for localization)
-
-### Disease Classes (14 total)
-1. Atelectasis
-2. Cardiomegaly
-3. Effusion
-4. Infiltration
-5. Mass
-6. Nodule
-7. Pneumonia
-8. Pneumothorax
-9. Consolidation
-10. Edema
-11. Emphysema
-12. Fibrosis
-13. Pleural_Thickening
-14. Hernia
-
-## 📁 Project Structure
-
-```
-XAI/
-├── data/                                  # Dataset (not tracked by git)
-│   ├── raw/NIH_ChestXray/
-│   ├── processed/
-│   └── annotations/
-│
-├── models/
-│   ├── __init__.py
-│   ├── cnn_model.py                      # ResNet50 architecture
-│   ├── train.py                          # Training pipeline
-│   └── checkpoints/                      # Model weights
-│
-├── xai/
-│   ├── __init__.py
-│   ├── base_explainer.py                 # Base explainer interface
-│   └── shap_explainer.py                 # SHAP implementation
-│
-├── utils/
-│   ├── __init__.py
-│   ├── dataset_loader.py                 # Dataset handling
-│   ├── preprocessing.py                  # Image preprocessing
-│   └── visualization.py                  # Visualization utilities
-│
-├── evaluation/
-│   ├── __init__.py
-│   └── metrics.py                        # Performance metrics
-│
-├── experiments/
-│   └── results/                          # Outputs and visualizations
-│
-├── configs/
-│   └── config.yaml                       # Configuration file
-│
-├── logs/                                 # Training logs
-├── main.py                               # Entry point
-├── requirements.txt                      # Dependencies
-├── .gitignore                            # Git ignore rules
-├── README.md                             # This file
-└── LICENSE
-```
-
-## ⚙️ Installation
-
-### 1. Clone and Navigate
-```bash
-cd /Users/nihaldastagiri/Desktop/XAI
-```
-
-### 2. Create Virtual Environment (Recommended)
-```bash
-python3.10 -m venv venv
-source venv/bin/activate  # On macOS/Linux
-```
-
-### 3. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Verify Installation
-```bash
-python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA Available: {torch.cuda.is_available()}')"
-```
-
-## 🚀 Quick Start
-
-### Training the Model
+- Train (CPU):
 
 ```bash
-python main.py train --config configs/config.yaml
+CUDA_VISIBLE_DEVICES="" python main.py train --config configs/config.yaml
 ```
 
-**What this does:**
-1. Loads the NIH ChestX-ray dataset
-2. Splits data into train (90%) and validation (10%)
-3. Creates ResNet50 model with 14 outputs
-4. Trains for 10 epochs with Adam optimizer
-5. Saves best model to `models/checkpoints/best_model.pth`
-6. Logs training history to `experiments/results/training_history.json`
-
-**Expected output:**
-```
-Training loss: 0.1234
-Validation loss: 0.1456, AUROC: 0.8765
-Best model saved at epoch 5 with loss 0.1234
-```
-
-### Generating SHAP Explanations
+- Explain a single image (method: `shap`, `gradcam`, `lime`):
 
 ```bash
-python main.py explain \
-    --config configs/config.yaml \
-    --model_path models/checkpoints/best_model.pth \
-    --image_path data/raw/NIH_ChestXray/images_001/images/00000001_000.png
+python main.py explain --config configs/config.yaml --model_path models/checkpoints/best_model.pth --image_path <IMAGE_PATH> --method gradcam
 ```
 
-**What this does:**
-1. Loads trained model
-2. Prepares background images (50 samples) for SHAP
-3. Computes SHAP values for the input image
-4. Generates visualizations:
-   - `predictions.png`: Model predictions bar chart
-   - `shap_explanation.png`: Original image + heatmap + overlay
-   - `original_image.png`: Input image
+- Quick evaluator (smoke test using small subset):
 
-**Output saved to:** `experiments/results/shap/`
-
-## ⚙️ Configuration
-
-The project is controlled by `configs/config.yaml`:
-
-```yaml
-# Dataset
-dataset:
-  path: "data/raw/NIH_ChestXray"
-  image_size: 224
-  num_classes: 14
-
-# Training
-training:
-  batch_size: 32
-  num_epochs: 10
-  learning_rate: 0.001
-  warmup_epochs: 2
-
-# SHAP
-shap:
-  background_size: 50
-  num_samples: 100
+```bash
+PYTHONPATH=. python3 scripts/evaluate_xai.py --config configs/config.yaml --model_path models/checkpoints/best_model.pth --subset_size 1 --device cpu
 ```
 
-Modify this file to customize:
-- Batch size and learning rate
-- Number of training epochs
-- SHAP background size
-- Number of workers for data loading
+- Full comparison (larger subset; slow):
 
-## 🧠 Model Architecture
-
-**ResNet50ChestXray**
-- **Backbone**: Pretrained ResNet50 (ImageNet weights)
-- **Output Layer**: Fully connected layer with 14 units
-- **Activation**: Sigmoid (for multi-label classification)
-- **Loss Function**: BCEWithLogitsLoss
-
-```python
-from models import get_model
-model = get_model(num_classes=14, device='cuda')
+```bash
+PYTHONPATH=. python3 scripts/evaluate_xai.py --config configs/config.yaml --model_path models/checkpoints/best_model.pth --subset_size 100 --device cpu
 ```
 
-### Model Summary
-```
-ResNet50ChestXray
-├── Backbone: ResNet50 (2048 features)
-├── Dropout: 50%
-└── FC Layer: 2048 → 14
+Notes
+- For local imports when running scripts, use `PYTHONPATH=.`.
+- Use `--device cuda` when running on a machine with a GPU to speed up SHAP/LIME.
+- SHAP needs a background set; the evaluator will attempt to build one from training data.
 
-Total parameters: ~23.7M
-Trainable parameters: ~23.7M
-```
+Explainability methods (implemented)
+- SHAP (GradientExplainer): pixel-level attributions using gradients.
+- Grad-CAM (Enhanced): guided & multi-scale Grad-CAM with post-processing and overlays.
+- LIME: superpixel-based perturbation + weighted linear model; evaluator rasterizes superpixel weights to pixels for consistent comparison.
 
-## 📊 Data Pipeline
+Evaluation metrics (implemented)
+- Fidelity: whether top-1 prediction is preserved when keeping only top-k important pixels.
+- Faithfulness: relative drop in prediction confidence when iteratively removing most important pixels.
+- Stability: similarity (cosine) between heatmaps for small input perturbations.
+- Sparsity: fraction of pixels considered important; encourages compact explanations.
+- Runtime: average runtime per explanation (normalized; lower is better before inversion).
 
-### Dataset Loader
+All metrics are normalized to [0,1] across methods for easy comparison. The evaluation code
+converts all explanations to pixel-space heatmaps (rasterizing LIME superpixel weights when necessary)
+so metrics are computed consistently.
 
-Automatically handles:
-- ✅ Scanning all 12 image folders
-- ✅ Building image-to-label mappings
-- ✅ Multi-label encoding (14 disease classes)
-- ✅ Train/val/test splits
-- ✅ Image preprocessing and augmentation
+Visualizations
+- `experiments/results/xai_comparison/` contains the generated comparison plots:
+    - `bar_chart.png` — per-metric bar chart
+    - `radar_chart.png` — radar plot across metrics
+    - `heatmap.png` — methods vs metrics matrix
+    - `results.json` — numeric values used for plotting
 
-```python
-from utils.dataset_loader import ChestXrayDataLoader
+Where per-explainer outputs are saved
+- Grad-CAM images: `experiments/results/Grad-CAM/`
+- LIME images: `experiments/results/LIME/`
+- SHAP images: `experiments/results/shap/`
 
-loader = ChestXrayDataLoader(
-    dataset_dir='data/raw/NIH_ChestXray',
-    csv_path='data/raw/NIH_ChestXray/Data_Entry_2017.csv'
-)
+Extending the project
+- Add a new explainer: implement an explainer under `xai/` exposing `explain(image, model, target_class)`.
+    Return either a pixel heatmap (HxW) or `weights`+`segments` for superpixel explainers; the evaluator will rasterize as needed.
+- Add metrics: extend `evaluation/xai_comparison.py` — each metric should accept a pixel-heatmap and return a scalar.
 
-train_loader, val_loader = loader.get_train_val_loaders(
-    train_val_list_path='data/raw/NIH_ChestXray/train_val_list.txt',
-    batch_size=32
-)
-```
+Troubleshooting
+- If imports fail when running scripts, prefix the command with `PYTHONPATH=.` and run from the repository root.
+- SHAP and LIME are computationally expensive; test with small `--subset_size` and use GPU when available.
 
-### Preprocessing
-
-**Training:**
-- Resize to 224×224
-- Horizontal flip (50%)
-- Rotation (±15°)
-- Color jitter
-- Normalization (ImageNet mean/std)
-
-**Inference:**
-- Resize to 224×224
-- Normalization only
-
-```python
-from utils.preprocessing import preprocess_image, denormalize_image
-
-image = preprocess_image('path/to/image.png', image_size=224, augment=False)
-denorm = denormalize_image(image)  # For visualization
-```
-
-## 🔍 SHAP Explainer
-
-### What is SHAP?
-
-SHAP (SHapley Additive exPlanations) provides:
-- **Feature Importance**: Which pixels matter for predictions?
-- **Local Explanations**: Why did the model make this specific prediction?
-- **Global Consistency**: Unified explanation framework
-
-### How It Works
-
-1. **Background Dataset**: Sample ~50 training images as baseline
-2. **Model Masking**: Iteratively mask regions of the input
-3. **Shapley Values**: Compute contribution of each pixel
-4. **Heatmap**: Visualize as overlay on original image
-
-### Usage
-
-```python
-from xai.shap_explainer import SHAPExplainer
-
-explainer = SHAPExplainer(
-    background_loader=background_loader,
-    num_samples=50,
-    device='cuda'
-)
-
-explanation = explainer.explain(
-    image=image_tensor,
-    model=model,
-    target_class=None  # Average over all classes
-)
-
-# Get results
-heatmap = explanation['attributions']  # (H, W)
-predictions = explanation['predictions']  # (14,)
-```
-
-### Visualization
-
-```python
-from utils.visualization import overlay_heatmap
-
-overlay_heatmap(
-    image=original_image_array,
-    heatmap=shap_heatmap,
-    alpha=0.5,
-    cmap='jet',
-    save_path='results/explanation.png'
-)
-```
-
-## 📈 Evaluation Metrics
-
-### Implemented Metrics
-
-```python
-from evaluation.metrics import MultiLabelMetrics
-
-# AUROC (Area Under ROC Curve)
-auroc = MultiLabelMetrics.compute_auroc(predictions, labels)
-
-# AUPRC (Area Under Precision-Recall Curve)
-auprc = MultiLabelMetrics.compute_auprc(predictions, labels)
-
+If you'd like, I can also add a short changelog summarizing the recent code and README changes, or commit these README edits for you.
 # F1 Score
 f1 = MultiLabelMetrics.compute_f1_score(predictions, labels, threshold=0.5)
 
@@ -511,6 +286,3 @@ For issues or questions, refer to:
 - Logs: `logs/main.log`
 - Results: `experiments/results/`
 
----
-
-**Made with ❤️ for XAI and Medical Imaging**
